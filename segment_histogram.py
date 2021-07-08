@@ -265,19 +265,23 @@ def print_horizontal_lines(vertical_lines, dataset_length, shortened_len=0):
     return horizontal_lines
 
 
-def plot_segments(dataset, result):
+def plot_segments(dataset, result, SS=[], name=""):
     """
     Draw the plot of original dataset and segment points
     :param dataset:
     :param result: segment points
     """
     figure(figsize=(12, 6))
-    plt.scatter(range(len(dataset)), dataset, s=5, label='data')
+    x = np.arange(len(dataset))
+    plt.plot(x, dataset, lw=0.1)
     for xc in result:
-        plt.axvline(x=xc, color='r')
+        plt.axvline(x=xc, color='r', lw=0.1)
     plt.ylim(min(dataset), max(dataset))
+    if len(SS) > 1:
+        plt.xlim(SS[0], SS[1])
     plt.legend()
-    plt.show()
+    plt.savefig('plot_segments_{0}.pdf'.format(name))
+    plt.close()
 
 
 def normalize_data(data, upper):
