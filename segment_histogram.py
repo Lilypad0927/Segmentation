@@ -280,7 +280,7 @@ def plot_segments(dataset, result, SS=[], name=""):
     if len(SS) > 1:
         plt.xlim(SS[0], SS[1])
     plt.legend()
-    plt.savefig('plot_segments_{0}.pdf'.format(name))
+    plt.savefig('Results/plot_segments_{0}.pdf'.format(name))
     plt.close()
 
 

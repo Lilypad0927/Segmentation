@@ -16,6 +16,7 @@ LN=num(:,12);
 F=sqrt(diff(X1).^2 + diff(Y1).^2 + diff(Z1).^2);
 
 %F=movmean(F,50);
+F_sorted=sort(F);
 
 % --- Demo ---
 F_selected=F(F<0.21911622850389115);

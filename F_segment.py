@@ -131,6 +131,26 @@ def calc_TF_HV(global_horizontal_lines, total_length, TS=0.002):
     return time_H, fraction_H, time_V, fraction_V
 
 
+def calc_TF_ZF(horizontal_segments_valued, stand_still_threshold, total_length, TS=0.002):
+    """
+    Calculate overall time and fraction of zero-F
+    :param horizontal_segments_valued:
+    :param stand_still_threshold: defines such parts as "zero F"
+    :param total_length:
+    :param TS: one timestamp interval, 2ms by default
+    :return: zero-F segments, time, fraction
+    """
+    ndigits = 2  # how many digits in final results
+    total_time = TS*(total_length-1)
+    zero_F_segments = [[x[0], x[1]] for x in horizontal_segments_valued if x[2] < stand_still_threshold]
+    if len(zero_F_segments) == 0:
+        return 0, 0
+    sum_zero_F = sum([item[1]-item[0] for item in zero_F_segments])
+    time_ZF = round(sum_zero_F * TS, 3)
+    fraction_ZF = round(time_ZF*100/total_time, ndigits)
+    return zero_F_segments, time_ZF, fraction_ZF
+
+
 def calc_SS_TF_HV(SS_segment, global_horizontal_lines, TS=0.002):
     """
     Calculate overall time and fraction of horizontal lines vs. non-horizontal lines for SS segment, and get horizontal
@@ -149,6 +169,30 @@ def calc_SS_TF_HV(SS_segment, global_horizontal_lines, TS=0.002):
             SS_horizontal_lines.append([start, end])
     time_H, fraction_H, time_V, fraction_V = calc_TF_HV(SS_horizontal_lines, SS_segment[1] - SS_segment[0], TS)
     return SS_horizontal_lines, time_H, fraction_H, time_V, fraction_V
+
+
+def calc_SS_TF_ZF(SS_segment, zero_F_segments, TS=0.002):
+    """
+    Get Zero F (stand still) info in this SS segment
+    :param SS_segment:
+    :param zero_F_segments:
+    :param TS: one timestamp interval, 2ms by default
+    :return: segments, time, fraction
+    """
+    ndigits = 2
+    SS_zero_F = []
+    time_ZF, fraction_ZF = 0, 0
+    for zero_F_segment in zero_F_segments:
+        if zero_F_segment[0] in range(SS_segment[0], SS_segment[1]) or zero_F_segment[1] in range(SS_segment[0], SS_segment[1]):
+            start = max(SS_segment[0], zero_F_segment[0])
+            end = min(SS_segment[1], zero_F_segment[1])
+            SS_zero_F.append([start, end])
+    if len(SS_zero_F) > 0:
+        sum_len = sum([item[1]-item[0] for item in SS_zero_F])
+        time_ZF = round(sum_len * TS, 3)
+        total_time = TS * (SS_segment[1] - SS_segment[0])
+        fraction_ZF = round(time_ZF*100/total_time, ndigits)
+    return SS_zero_F, time_ZF, fraction_ZF
 
 
 def calc_SS_global_G0(SS_segment, Global_G0_segments, TS=0.002):
@@ -198,12 +242,13 @@ def calc_local_G0(SS_segment, SS_horizontal_lines, F_complete, elbow_value, TS=0
     return SS_local_G0, time_local_G0, frac_local_G0
 
 
-def calc_G2(SS_segment, SS_horizontal_lines, F_complete, TS=0.002):
+def calc_G2(SS_segment, SS_horizontal_lines, F_complete, stand_still_threshold, TS=0.002):
     """
-    All values below lower bound of the min bin with a horizontal line in that Partition is G2
+    All values below lower bound of the NON-ZERO min bin with a horizontal line in that Partition is G2
     :param SS_segment:
     :param SS_horizontal_lines:
     :param F_complete:
+    :param stand_still_threshold: defines such parts as "zero F"
     :param TS: one timestamp interval, 2ms by default
     :return: segments, time, fraction
     """
@@ -211,10 +256,14 @@ def calc_G2(SS_segment, SS_horizontal_lines, F_complete, TS=0.002):
     total_time = TS * (SS_segment[1] - SS_segment[0])
     bins_val = []
     for SS_horizontal_line in SS_horizontal_lines:
-        bins_val.append(min(F_complete[SS_horizontal_line[0]:SS_horizontal_line[1]]))
+        lower_bound = min(F_complete[SS_horizontal_line[0]:SS_horizontal_line[1]])
+        if lower_bound > stand_still_threshold:
+            bins_val.append(lower_bound)
+    if len(bins_val) == 0:
+        return [], 0, 0
     min_bin_val = min(bins_val)
-    G0_indexes = [i for i, v in enumerate(F_complete) if v < min_bin_val and i in range(SS_segment[0],SS_segment[1])]
-    SS_G2 = get_continuous_index(G0_indexes)
+    G2_indexes = [i for i, v in enumerate(F_complete) if stand_still_threshold < v < min_bin_val and i in range(SS_segment[0],SS_segment[1])]
+    SS_G2 = get_continuous_index(G2_indexes)
     time_G2 = round((sum([item[1]-item[0] for item in SS_G2])) * TS, 3)
     frac_G2 = round(time_G2*100/total_time, ndigits)
     return SS_G2, time_G2, frac_G2
@@ -226,6 +275,7 @@ if __name__ == '__main__':
     path = "Datasets/{0}/Trace/".format(Dataset_name)  # path for your "Trace" folder
 
     # <editor-fold desc="Parameters that can be left alone">
+    stand_still_threshold = 0.002  # defines such parts as "zero F"
     moving_mean = 10  # Moving mean filter size
     TS_interval = 0.002  # one timestamp interval, 2ms by default
     measurements_file_name = "{0}measurements.csv".format(path)
@@ -236,7 +286,7 @@ if __name__ == '__main__':
     bin_size = 10  # size of a bin, Can leave it alone as dataset is normalized to (0,10000)
     # min_length = 200  # for horizontal lines, Can leave it alone as it's automatically decided by histogram
     debug = False  # if true, print log
-    output_file = open("result_{0}.txt".format(Dataset_name), "w")  # for output
+    output_file = open("Results/result_{0}.txt".format(Dataset_name), "w")  # for output
     # </editor-fold>
 
     start_time = time.time()
@@ -250,7 +300,8 @@ if __name__ == '__main__':
 
     # Generate F
     F_G1, F_complete, Global_G0_segments, elbow_value = generate_F(measurements, columns, moving_mean)
-    output_file.writelines("Elbow value for global G0/G1: {0} \n\n".format(elbow_value))
+    output_file.writelines("Elbow value for global G0/G1: {0} \n".format(elbow_value))
+    output_file.writelines("Stand still threshold: {0} \n\n".format(stand_still_threshold))
     output_file.writelines("Global G0 segments: {0} \n".format(Global_G0_segments))
     output_file.writelines("Global G0 fraction: {0}% \n\n".format(round((len(F_complete)-len(F_G1))*100/len(F_complete), 2)))
 
@@ -271,32 +322,39 @@ if __name__ == '__main__':
     output_file.writelines("F Horizontal segments with value:\n{0} \n\n".format(horizontal_segments_valued))
 
     # <editor-fold desc="Statistics">
-    # 1. overall time and fraction of horizontal lines vs. non-horizontal lines
+    # 1. Global statistics
+    # 1.1 overall time and fraction of horizontal lines vs. non-horizontal lines
+    # 1.2 overall time and fraction of zero-F
     time_H, fraction_H, time_V, fraction_V = calc_TF_HV(global_horizontal_lines, len(F_complete), TS_interval)
-    output_file.writelines("Overall time of horizontal lines: {0}s, Fraction: {1}% \nOverall time of non-horizontal "
-                           "lines: {2}s, Fraction: {3}% \n\n".format(time_H, fraction_H, time_V, fraction_V))
+    output_file.writelines("Overall time of Horizontal lines: {0}s, Fraction: {1}% \nOverall time of Non-horizontal "
+                           "lines: {2}s, Fraction: {3}% \n".format(time_H, fraction_H, time_V, fraction_V))
+    zero_F_segments, time_ZF, fraction_ZF = calc_TF_ZF(horizontal_segments_valued, stand_still_threshold, len(F_complete), TS_interval)
+    output_file.writelines("Overall time of Standing still: {0}s, Fraction: {1}%, segments: {2}\n\n".format(time_ZF, fraction_ZF, zero_F_segments))
     # 2. per SS-Partition :
     # 2.1 time and fraction of horizontal lines vs. non-horizontal lines;
     # 2.2 time and fraction of local G0 (For each SS-Partition we identify all values above the maximum bin with a
     # horizontal line in that Partition as local G0);
-    # 2.3 time and fraction of G2 (define all values below the min bin with a horizontal line in that Partition as G2)
+    # 2.3 time and fraction of G2 (define all values below the NON-ZERO min bin with a horizontal line in that Partition
+    # as G2)
     for SS_segment in SS_segments:
         SS_value = round(np.mean(measurements["SS"][SS_segment[0]: SS_segment[1]]))
         if SS_value > 0:
             SS_time = TS_interval * (SS_segment[1]-SS_segment[0])
             output_file.writelines("For SS_segment {0} : SS = {1}, time = {2}s\n".format(SS_segment, SS_value, SS_time))
             SS_horizontal_lines, time_H, fraction_H, time_V, fraction_V = calc_SS_TF_HV(SS_segment, global_horizontal_lines, TS_interval)
-            output_file.writelines("1. time of horizontal lines = {0}s, Fraction = {1}% ; time of non-horizontal "
-                           "lines = {2}s, Fraction = {3}% \n".format(time_H, fraction_H, time_V, fraction_V))
+            output_file.writelines("1. Horizontal lines: time = {0}s, Fraction = {1}% \n2. Non-horizontal "
+                           "lines: time = {2}s, Fraction = {3}% \n".format(time_H, fraction_H, time_V, fraction_V))
+            SS_zero_F, time_ZF, fraction_ZF = calc_SS_TF_ZF(SS_segment, zero_F_segments, TS_interval)
+            output_file.writelines("3. Stand still: time = {0}s, Fraction = {1}%, segments: {2}\n".format(time_ZF, fraction_ZF, SS_zero_F))
             SS_global_G0, time_global_G0, frac_global_G0 = calc_SS_global_G0(SS_segment, Global_G0_segments, TS_interval)
-            output_file.writelines("2. Global G0: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_global_G0, time_global_G0, frac_global_G0))
+            output_file.writelines("4. Global G0: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_global_G0, time_global_G0, frac_global_G0))
             SS_local_G0, time_local_G0, frac_local_G0 = calc_local_G0(SS_segment, SS_horizontal_lines, F_complete, elbow_value, TS_interval)
-            output_file.writelines("3. Local G0: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_local_G0, time_local_G0, frac_local_G0))
-            SS_G2, time_G2, frac_G2 = calc_G2(SS_segment, SS_horizontal_lines, F_complete, TS_interval)
-            output_file.writelines("4. G2: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_G2, time_G2, frac_G2))
+            output_file.writelines("5. Local G0: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_local_G0, time_local_G0, frac_local_G0))
+            SS_G2, time_G2, frac_G2 = calc_G2(SS_segment, SS_horizontal_lines, F_complete, stand_still_threshold, TS_interval)
+            output_file.writelines("6. G2: time = {1}s, Fraction = {2}%, segments: {0}\n".format(SS_G2, time_G2, frac_G2))
             time_none = round(time_V - time_global_G0 - time_local_G0 - time_G2, 3)
             frac_none = round(fraction_V - frac_global_G0 - frac_local_G0 - frac_G2, 2)
-            output_file.writelines("5. None: time = {0}s, Fraction = {1}% \n\n".format(time_none, frac_none))
+            output_file.writelines("7. None: time = {0}s, Fraction = {1}% \n\n".format(time_none, frac_none))
             plot_segments(F_complete, np.sort(np.array(SS_horizontal_lines).flatten()), SS_segment, "{0}_{1}".format(Dataset_name,SS_segment))
     # </editor-fold>
 
